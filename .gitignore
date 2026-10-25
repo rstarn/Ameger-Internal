@@ -1,0 +1,13 @@
+# build tree contents and editor state
+Build/*
+!Build/Configuration.ini
+.vs/
+.cache/
+compile_commands.json
+
+# artifacts
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
