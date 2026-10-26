@@ -1,8 +1,7 @@
-# clangd config — pairs with compile_commands.json that CMake writes into Build/
 CompileFlags:
   CompilationDatabase: Build
-  Compiler: clang-cl                 # MSVC ABI driver — parses /flags natively; also armor for cl.exe-generated DBs
-  Remove: ['/Zi', '/ZI', '/Z7', '/FS', '/JMC', '/analyze']  # cl-only PDB/edit-continue/analyze flags clangd chokes on
+  Compiler: clang-cl
+  Remove: ['/Zi', '/ZI', '/Z7', '/FS', '/JMC', '/analyze']
 Diagnostics:
   UnusedIncludes: Strict
   MissingIncludes: Strict
