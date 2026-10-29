@@ -2543,3 +2543,70 @@ opposite — it patches game memory (inline detours) and clears PEB flags. Using
 **explicit, user-directed exception**. If the goal is only *verification*, a read-only
 payload (in-process read-back) would be the policy-compliant path; this DLL is the
 anti-debug-defeating path the user has chosen.
+
+---
+
+# PART N — Backtrack uid-link, confirmed live (build 2.25.0.23432) `[SRC]`
+
+The backtrack link is a **uid (integer handle), not a direct pointer** — confirmed on our
+build **2.25.0.23432**:
+
+- The triple at `+0xD0` / `+0xD4` / `+0xD8` was the exact offset: **all three fields matched
+  and were nonzero**, and the uid resolved back to the entity exactly as described.
+- A pointer sweep over the controller object found **no pawn pointers** — precisely because
+  the link is a uid, so sweeping for pointers misses it by construction.
+
+Two further observations:
+
+1. **The triple is state-gated.** All three fields are **zeroed during hero select** and are
+   only written once the round actually starts. Reading them before the round begins returns
+   zero.
+2. **Across death/respawn:** the controller-side comps carrying `0x33` get **recreated at
+   new addresses**, but the uid in the triple and the body entity itself **stay the same** —
+   so the link survives a respawn without re-resolving anything.
+
+**Implication:** a backtrack implementation should read the uid from the `+0xD0/D4/D8` triple
+(not sweep for pointers), and must account for the state-gating (zero during hero select) and
+the respawn-stable uid. This closes the "runtime-verified only" status noted in PART L
+(line 2466 / line 2470): the backtrack candidates are now confirmed on 23432.
+
+---
+
+# PART O — End-to-end confirmed uid-link reader (build 2.25.0.23432) `[SRC]`
+
+The reader is confirmed end-to-end. Pipeline, exactly as it runs:
+
+1. **Roster scan:** run a full entity scan only while the map hasn't reached max capacity
+   (12 for 6v6, 10 for 5v5). Filter entities whose uid starts with the `0x80` prefix and
+   keep only those carrying a **Link component**. This yields a stable 10/10 roster that
+   survives the whole match.
+2. **Static controller uids:** controller uids are static and allocated adjacently
+   (`0x80000231`–`243` in one observed match), and they remain valid from game start to end
+   (until the player disconnects).
+3. **Body uid from Link comp D4:** read the matched body uid from the Link component's `+0xD4`.
+   That uid **changes during the game** (respawn / hero swap), so it is refreshed **every tick**
+   — caching it is what bit the reader before. The refreshed uid is then resolved through the
+   game admin's entity table (`admin + 0x18`).
+
+Two gotchas for anyone re-implementing:
+
+- **Dedupe by uid.** A single player uid can have **multiple nodes** in the table (the
+  controller plus shared gameadmin-type entities), and more than one node can carry a Link
+  comp pointing at the same body. Without deduping by uid you enumerate the same player
+  twice.
+- **Do not cache the Link comp pointer.** The comp is recreated at a **new address** across
+  life transitions. Instead re-derive the slot from the **per-tid presence bitmap at
+  `ent + 0x110`** (a set bit = the comp is present; the cumulative counts at `+0x130` give
+  the exact slot in the `+0x80` array, used for rank/select). So a "has Link" check plus
+  slot lookup is only **~4 reads** instead of decoding all 64 slots. `#7831` lists the same
+  bitmap on CN, so it is likely a cross-build fact.
+
+## Open question: reliable team/side source for players
+
+No reliable direct field found yet. A team-looking byte on the **0x3a comp `(+0xD8)`** reads
+clean `1`/`2` right after spawn, but it **drifts through the round** (one player went `1 → 70`
+mid-match), and the 1/2 split does **not** line up with actual teams on cross-check. Current
+workaround: derive side from **spawn-room clustering** (works, but is a detour). An open
+question remains: **is there a direct team/side field being missed?** Flagged as unresolved.
+
+---
